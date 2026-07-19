@@ -32,6 +32,25 @@ make docker-build
 make docker-run         # mounts ./stubs and ./stubr.yaml into container
 ```
 
+Docker Compose:
+
+```yaml
+# docker-compose.yml
+services:
+  stubr:
+    image: sutanto/stubr:4ae42e2
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./stubs:/stubs
+      - ./stubr.yaml:/etc/stubr.yaml
+    command: -config /etc/stubr.yaml -dir /stubs
+```
+
+```sh
+docker compose up -d
+```
+
 ## Project Structure
 
 ```
