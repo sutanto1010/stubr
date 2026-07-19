@@ -27,3 +27,8 @@ methods:
   POST:
     status: 201
     delay: 100
+    actions:
+      - type: command
+        timeout: 10s
+        command: |
+          echo '{{.Request.Body}}' | kcat -P -b localhost:9092 -t user.created
