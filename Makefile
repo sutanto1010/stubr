@@ -2,7 +2,7 @@
 
 APP_NAME   := stubr
 BIN_DIR    := bin
-IMAGE_NAME := stubr
+IMAGE_NAME := sutanto/stubr
 VERSION    ?= latest
 
 build:
