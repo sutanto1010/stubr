@@ -55,18 +55,25 @@ docker compose up -d
 
 ```
 stubs/
-├── _stubr.yaml              # root defaults (headers, etc.)
+├── _stubr.yaml              # (optional) Root-level defaults applied to all stubs
+│                            # (e.g., global response headers, CORS, latency)
 ├── health/
-│   └── GET.json
+│   └── GET.json             # GET /health → health check endpoint,
+│                            # no parent config, responds with 200 OK by default
 ├── api/
-│   ├── _stubr.yaml          # api-level config
+│   ├── _stubr.yaml          # (optional) API-scoped config inherited by all routes
+│                            # under /api/ (overrides/extends root defaults)
 │   └── users/
-│       ├── _stubr.yaml      # route config, query matches, method overrides
-│       ├── GET.json
-│       ├── POST.json
-│       ├── admin.json       # served when ?role=admin
+│       ├── _stubr.yaml      # (optional) Route-level config for /api/users
+│                            # Defines query-param matching (e.g., ?role=admin),
+│                            # HTTP method overrides, response variants, etc.
+│       ├── GET.json         # GET /api/users → list all users
+│       ├── POST.json        # POST /api/users → create a new user
+│       ├── admin.json       # GET /api/users?role=admin → served when query param
+│                            # matches, alternative response variant
 │       └── :id/
-│           └── GET.json     # dynamic path segment
+│           └── GET.json     # GET /api/users/:id → dynamic path segment,
+│                            # :id is extracted from the URL as a path parameter
 ```
 
 ## How It Works
