@@ -1,0 +1,17 @@
+port: 8080
+host: "0.0.0.0"
+stubs_dir: "./stubs"
+verbose: false
+
+headers:
+  X-Stubr: "true"
+
+routes:
+  - path: /api/health
+    method: GET
+    response:
+      file: ./stubs/health/GET.json
+      status: 200
+      headers:
+        Content-Type: application/json
+      delay: 0
