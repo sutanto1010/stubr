@@ -1,0 +1,1 @@
+{"role": "admin", "permissions": ["read", "write", "delete"], "matched_by": "query_match"}

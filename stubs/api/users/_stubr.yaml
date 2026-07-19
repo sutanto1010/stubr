@@ -1,0 +1,29 @@
+status: 200
+delay: 50
+headers:
+  X-Resource: users
+
+query_match:
+  - params:
+      role: admin
+    status: 200
+    file: ./admin.json
+    delay: 100
+    headers:
+      X-Role: admin
+
+  - params:
+      role: user
+      page: "1"
+    status: 200
+    file: ./page1.json
+
+methods:
+  GET:
+    delay: 30
+    headers:
+      Cache-Control: max-age=60
+
+  POST:
+    status: 201
+    delay: 100

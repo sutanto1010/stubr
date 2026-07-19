@@ -1,0 +1,7 @@
+headers:
+  X-Api-Version: "v1"
+
+methods:
+  GET:
+    headers:
+      Cache-Control: no-cache

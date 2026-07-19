@@ -1,4 +1,4 @@
-.PHONY: build run test lint docker-build docker-run docker-push clean
+.PHONY: build run test lint fmt tidy install docker-build docker-run docker-push clean
 
 APP_NAME   := stubr
 BIN_DIR    := bin
@@ -17,6 +17,15 @@ test:
 
 lint:
 	go vet ./...
+
+fmt:
+	go fmt ./...
+
+tidy:
+	go mod tidy
+
+install: build
+	cp $(BIN_DIR)/$(APP_NAME) /usr/local/bin/$(APP_NAME)
 
 docker-build:
 	docker build -t $(IMAGE_NAME):$(VERSION) .

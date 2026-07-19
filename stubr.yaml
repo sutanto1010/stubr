@@ -3,9 +3,6 @@ host: "0.0.0.0"
 stubs_dir: "./stubs"
 verbose: false
 
-headers:
-  X-Stubr: "true"
-
 routes:
   - path: /api/health
     method: GET

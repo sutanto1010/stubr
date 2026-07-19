@@ -109,25 +109,25 @@ func ReadBody(r *http.Request) string {
 	return string(body)
 }
 
-func CopyResponseBody(w *responseWriter) string {
+func CopyResponseBody(w *ResponseWriter) string {
 	if w.buf != nil {
 		return w.buf.String()
 	}
 	return ""
 }
 
-type responseWriter struct {
+type ResponseWriter struct {
 	http.ResponseWriter
 	buf    *bytes.Buffer
 	status int
 }
 
-func (rw *responseWriter) WriteHeader(status int) {
+func (rw *ResponseWriter) WriteHeader(status int) {
 	rw.status = status
 	rw.ResponseWriter.WriteHeader(status)
 }
 
-func (rw *responseWriter) Write(b []byte) (int, error) {
+func (rw *ResponseWriter) Write(b []byte) (int, error) {
 	if rw.buf == nil {
 		rw.buf = &bytes.Buffer{}
 	}
@@ -135,10 +135,10 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return rw.ResponseWriter.Write(b)
 }
 
-func NewResponseWriter(w http.ResponseWriter) *responseWriter {
-	return &responseWriter{ResponseWriter: w, status: http.StatusOK}
+func NewResponseWriter(w http.ResponseWriter) *ResponseWriter {
+	return &ResponseWriter{ResponseWriter: w, status: http.StatusOK}
 }
 
-func (rw *responseWriter) Status() int {
+func (rw *ResponseWriter) Status() int {
 	return rw.status
 }

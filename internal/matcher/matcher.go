@@ -1,15 +1,47 @@
 package matcher
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"stubr/internal/config"
 )
 
+var dirConfigCache = make(map[string]*config.DirConfig)
+
 type Match struct {
-	FilePath string
-	Params   map[string]string
+	FilePath   string
+	Params     map[string]string
+	MatchedDir string
+	DirConfig  *config.DirConfig
+}
+
+func LoadDirConfigs(stubsDir string) error {
+	absDir, err := filepath.Abs(stubsDir)
+	if err != nil {
+		return err
+	}
+
+	return filepath.WalkDir(absDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		dc, err := config.LoadDirConfig(path)
+		if err != nil {
+			log.Printf("matcher: error loading _stubr.yaml in %s: %v", path, err)
+			return nil
+		}
+		if dc != nil {
+			dirConfigCache[path] = dc
+		}
+		return nil
+	})
 }
 
 func MatchPath(stubsDir, method, path string) (*Match, error) {
@@ -24,8 +56,13 @@ func MatchPath(stubsDir, method, path string) (*Match, error) {
 
 	method = strings.ToUpper(method)
 
+	absRoot, err := filepath.Abs(stubsDir)
+	if err != nil {
+		return nil, err
+	}
+
 	segments := splitPath(path)
-	matches := findMatches(stubsDir, segments, method, 0)
+	matches := findMatches(absRoot, segments, method, 0)
 
 	if len(matches) == 0 {
 		return nil, nil
@@ -34,16 +71,54 @@ func MatchPath(stubsDir, method, path string) (*Match, error) {
 	sortMatches(matches)
 	best := matches[0]
 
+	resolvedDC := resolveDirConfig(absRoot, best.matchedDir, method)
+
 	return &Match{
-		FilePath: best.filePath,
-		Params:   best.params,
+		FilePath:   best.filePath,
+		Params:     best.params,
+		MatchedDir: best.matchedDir,
+		DirConfig:  resolvedDC,
 	}, nil
+}
+
+func resolveDirConfig(rootDir, matchedDir, method string) *config.DirConfig {
+	rootDir = filepath.Clean(rootDir)
+	matchedDir = filepath.Clean(matchedDir)
+
+	if !strings.HasPrefix(matchedDir, rootDir) {
+		return nil
+	}
+
+	rel, err := filepath.Rel(rootDir, matchedDir)
+	if err != nil {
+		return nil
+	}
+
+	var merged *config.DirConfig
+	currentDir := rootDir
+
+	if dc, ok := dirConfigCache[currentDir]; ok {
+		merged = config.MergeDirConfigs(merged, dc)
+	}
+
+	if rel != "." {
+		parts := strings.Split(rel, string(filepath.Separator))
+		for _, part := range parts {
+			currentDir = filepath.Join(currentDir, part)
+			if dc, ok := dirConfigCache[currentDir]; ok {
+				merged = config.MergeDirConfigs(merged, dc)
+			}
+		}
+	}
+
+	return config.ResolveMethodConfig(merged, method)
 }
 
 type matchResult struct {
 	filePath     string
 	params       map[string]string
 	dynamicCount int
+	matchedDir   string
 }
 
 func findMatches(baseDir string, segments []string, method string, depth int) []matchResult {
@@ -64,10 +139,7 @@ func findMatches(baseDir string, segments []string, method string, depth int) []
 
 	if info, err := os.Stat(staticDir); err == nil && info.IsDir() {
 		subResults := findMatches(staticDir, segments, method, depth+1)
-		for _, r := range subResults {
-			r.dynamicCount += 0
-			results = append(results, r)
-		}
+		results = append(results, subResults...)
 	}
 
 	entries, err := os.ReadDir(currentDir)
@@ -80,7 +152,7 @@ func findMatches(baseDir string, segments []string, method string, depth int) []
 			continue
 		}
 		name := entry.Name()
-		if !isDynamicSegment(name) {
+		if !isDynamicSegment(name) || name == "_stubr.yaml" {
 			continue
 		}
 		paramName := extractParamName(name)
@@ -112,12 +184,16 @@ func matchFiles(dir string, method string) []matchResult {
 			continue
 		}
 		name := entry.Name()
+		if name == "_stubr.yaml" {
+			continue
+		}
 		ext := filepath.Ext(name)
 		methodPart := strings.TrimSuffix(name, ext)
 
 		if strings.EqualFold(methodPart, method) {
 			results = append(results, matchResult{
-				filePath: filepath.Join(dir, name),
+				filePath:   filepath.Join(dir, name),
+				matchedDir: dir,
 			})
 		}
 	}
@@ -128,12 +204,16 @@ func matchFiles(dir string, method string) []matchResult {
 				continue
 			}
 			name := entry.Name()
+			if name == "_stubr.yaml" {
+				continue
+			}
 			ext := filepath.Ext(name)
 			methodPart := strings.TrimSuffix(name, ext)
 
 			if strings.EqualFold(methodPart, "default") {
 				results = append(results, matchResult{
 					filePath:     filepath.Join(dir, name),
+					matchedDir:   dir,
 					dynamicCount: 9999,
 				})
 			}
@@ -179,15 +259,20 @@ func ListAvailablePaths(stubsDir string) []string {
 	var paths []string
 	seen := make(map[string]bool)
 
-	filepath.WalkDir(stubsDir, func(path string, d os.DirEntry, err error) error {
+	absDir, _ := filepath.Abs(stubsDir)
+
+	filepath.WalkDir(absDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
 			return nil
 		}
+		if filepath.Base(path) == "_stubr.yaml" {
+			return nil
+		}
 
-		rel, err := filepath.Rel(stubsDir, path)
+		rel, err := filepath.Rel(absDir, path)
 		if err != nil {
 			return nil
 		}

@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +18,8 @@ const (
 	ActionWebhook ActionType = "webhook"
 	ActionScript  ActionType = "script"
 )
+
+// --- Root config ---
 
 type Config struct {
 	Port              int               `yaml:"port"`
@@ -42,18 +46,28 @@ type ResponseConfig struct {
 	Delay   int               `yaml:"delay"`
 }
 
-type Action struct {
-	Type    ActionType         `yaml:"type"`
-	Command string             `yaml:"command"`
-	Timeout string             `yaml:"timeout"`
-	Env     map[string]string  `yaml:"env"`
-	URL     string             `yaml:"url"`
-	Method  string             `yaml:"method"`
-	Headers map[string]string  `yaml:"headers"`
-	Body    string             `yaml:"body"`
-	Retry   int                `yaml:"retry"`
-	Inline  string             `yaml:"inline"`
+// --- Directory-level config (_stubr.yaml) ---
+
+type DirConfig struct {
+	Status     int                   `yaml:"status"`
+	Delay      int                   `yaml:"delay"`
+	Headers    map[string]string     `yaml:"headers"`
+	File       string                `yaml:"file"`
+	Actions    []Action              `yaml:"actions"`
+	Methods    map[string]*DirConfig `yaml:"methods"`
+	QueryMatch []QueryMatch          `yaml:"query_match"`
 }
+
+type QueryMatch struct {
+	Params  map[string]string `yaml:"params"`
+	Status  int               `yaml:"status"`
+	Delay   int               `yaml:"delay"`
+	Headers map[string]string `yaml:"headers"`
+	File    string            `yaml:"file"`
+	Actions []Action          `yaml:"actions"`
+}
+
+// --- Template context types ---
 
 type TemplateContext struct {
 	Request   RequestContext
@@ -75,6 +89,23 @@ type ResponseContext struct {
 	Headers map[string]string
 	Body    string
 }
+
+// --- Action types ---
+
+type Action struct {
+	Type    ActionType        `yaml:"type"`
+	Command string            `yaml:"command"`
+	Timeout string            `yaml:"timeout"`
+	Env     map[string]string `yaml:"env"`
+	URL     string            `yaml:"url"`
+	Method  string            `yaml:"method"`
+	Headers map[string]string `yaml:"headers"`
+	Body    string            `yaml:"body"`
+	Retry   int               `yaml:"retry"`
+	Inline  string            `yaml:"inline"`
+}
+
+// --- Config loading ---
 
 func DefaultConfig() *Config {
 	return &Config{
@@ -166,4 +197,167 @@ func (c *Config) MergeCLI(port int, host, dir string) {
 	if dir != "" {
 		c.StubsDir = dir
 	}
+}
+
+// --- DirConfig loading & merging ---
+
+func LoadDirConfig(dir string) (*DirConfig, error) {
+	cfgPath := filepath.Join(dir, "_stubr.yaml")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var dc DirConfig
+	if err := yaml.Unmarshal(data, &dc); err != nil {
+		return nil, fmt.Errorf("invalid _stubr.yaml in %s: %w", dir, err)
+	}
+	return &dc, nil
+}
+
+func MergeDirConfigs(base, override *DirConfig) *DirConfig {
+	if base == nil {
+		return override.clone()
+	}
+	if override == nil {
+		return base.clone()
+	}
+
+	merged := base.clone()
+
+	if override.Status != 0 {
+		merged.Status = override.Status
+	}
+	if override.Delay != 0 {
+		merged.Delay = override.Delay
+	}
+	if override.File != "" {
+		merged.File = override.File
+	}
+	if override.Headers != nil {
+		if merged.Headers == nil {
+			merged.Headers = make(map[string]string)
+		}
+		for k, v := range override.Headers {
+			merged.Headers[k] = v
+		}
+	}
+	if override.Actions != nil {
+		merged.Actions = append(merged.Actions, override.Actions...)
+	}
+	if override.QueryMatch != nil {
+		merged.QueryMatch = append(override.QueryMatch, merged.QueryMatch...)
+	}
+	if override.Methods != nil {
+		if merged.Methods == nil {
+			merged.Methods = make(map[string]*DirConfig)
+		}
+		for name, m := range override.Methods {
+			if existing, ok := merged.Methods[name]; ok {
+				merged.Methods[name] = MergeDirConfigs(existing, m)
+			} else {
+				merged.Methods[name] = m.clone()
+			}
+		}
+	}
+
+	return merged
+}
+
+func ResolveMethodConfig(dc *DirConfig, method string) *DirConfig {
+	if dc == nil {
+		return nil
+	}
+	method = strings.ToUpper(method)
+
+	base := dc.clone()
+	base.Methods = nil
+
+	if methodOverride, ok := dc.Methods[method]; ok {
+		return MergeDirConfigs(base, methodOverride)
+	}
+	return base
+}
+
+func FindQueryMatch(dc *DirConfig, query url.Values) *QueryMatch {
+	if dc == nil || len(dc.QueryMatch) == 0 {
+		return nil
+	}
+
+	for i := range dc.QueryMatch {
+		qm := &dc.QueryMatch[i]
+		if matchParams(qm.Params, query) {
+			return qm
+		}
+	}
+	return nil
+}
+
+func matchParams(expected map[string]string, actual url.Values) bool {
+	for key, want := range expected {
+		got := actual.Get(key)
+		if got != want {
+			return false
+		}
+	}
+	return true
+}
+
+func (dc *DirConfig) clone() *DirConfig {
+	if dc == nil {
+		return nil
+	}
+	c := &DirConfig{
+		Status: dc.Status,
+		Delay:  dc.Delay,
+		File:   dc.File,
+	}
+	if dc.Headers != nil {
+		c.Headers = make(map[string]string, len(dc.Headers))
+		for k, v := range dc.Headers {
+			c.Headers[k] = v
+		}
+	}
+	if dc.Actions != nil {
+		c.Actions = make([]Action, len(dc.Actions))
+		copy(c.Actions, dc.Actions)
+	}
+	if dc.QueryMatch != nil {
+		c.QueryMatch = make([]QueryMatch, len(dc.QueryMatch))
+		for i := range dc.QueryMatch {
+			qm := dc.QueryMatch[i]
+			cloneQM := QueryMatch{
+				Status: qm.Status,
+				Delay:  qm.Delay,
+				File:   qm.File,
+			}
+			if qm.Params != nil {
+				cloneQM.Params = make(map[string]string, len(qm.Params))
+				for k, v := range qm.Params {
+					cloneQM.Params[k] = v
+				}
+			}
+			if qm.Headers != nil {
+				cloneQM.Headers = make(map[string]string, len(qm.Headers))
+				for k, v := range qm.Headers {
+					cloneQM.Headers[k] = v
+				}
+			}
+			if qm.Actions != nil {
+				cloneQM.Actions = make([]Action, len(qm.Actions))
+				copy(cloneQM.Actions, qm.Actions)
+			}
+			c.QueryMatch[i] = cloneQM
+		}
+	}
+	if dc.Methods != nil {
+		c.Methods = make(map[string]*DirConfig, len(dc.Methods))
+		for k, v := range dc.Methods {
+			c.Methods[k] = v.clone()
+		}
+	}
+	return c
 }

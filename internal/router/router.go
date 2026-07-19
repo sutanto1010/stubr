@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,25 +16,28 @@ import (
 )
 
 type Router struct {
-	cfg     *config.Config
-	handler http.Handler
+	cfg *config.Config
+	mux *http.ServeMux
 }
 
 func New(cfg *config.Config) *Router {
 	r := &Router{cfg: cfg}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", r.handle)
-	r.handler = mux
+	r.mux = http.NewServeMux()
+	r.mux.HandleFunc("/", r.handle)
+
+	if err := matcher.LoadDirConfigs(cfg.StubsDir); err != nil {
+		log.Printf("router: error loading directory configs: %v", err)
+	}
+
 	return r
 }
 
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rt.handler.ServeHTTP(w, r)
+	rt.mux.ServeHTTP(w, r)
 }
 
 func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Path
-	path = strings.TrimSuffix(path, "/")
+	path := strings.TrimSuffix(r.URL.Path, "/")
 	if path == "" {
 		path = "/"
 	}
@@ -51,35 +55,12 @@ func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Duration(rt.cfg.GlobalDelay) * time.Millisecond)
 	}
 
-	var filePath string
-	var status int
-	var respHeaders map[string]string
 	var respBody string
-
 	rw := responder.NewResponseWriter(w)
 
 	if cfgRoute != nil {
-		filePath = responder.FileFromConfig(cfgRoute)
-		status = responder.StatusFromConfig(cfgRoute)
-		respHeaders = mergeHeaders(rt.cfg.Headers, responder.HeadersFromConfig(cfgRoute))
-
-		if cfgRoute.Response.Delay > 0 {
-			time.Sleep(time.Duration(cfgRoute.Response.Delay) * time.Millisecond)
-		}
-
-		if filePath != "" {
-			handler := responder.Respond(filePath, status, respHeaders)
-			handler(rw, r)
-		} else {
-			handler := responder.RespondBytes([]byte{}, status, respHeaders)
-			handler(rw, r)
-		}
+		rt.serveConfigRoute(rw, r, cfgRoute, requestBody)
 		respBody = responder.CopyResponseBody(rw)
-
-		if len(cfgRoute.Actions) > 0 {
-			tmplCtx := actions.BuildTemplateContext(r, requestBody, rw.Status(), respHeaders, respBody)
-			go actions.Run(context.Background(), cfgRoute.Actions, tmplCtx)
-		}
 		return
 	}
 
@@ -99,16 +80,107 @@ func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if match != nil {
-		status = http.StatusOK
-		respHeaders = rt.cfg.Headers
+		status, respHeaders, finalFile, delay, allActions := rt.resolveDirResponse(match, r)
+		respHeaders = mergeHeaders(rt.cfg.Headers, respHeaders)
 
-		handler := responder.Respond(match.FilePath, status, respHeaders)
+		if delay > 0 {
+			time.Sleep(time.Duration(delay) * time.Millisecond)
+		}
+
+		handler := responder.Respond(finalFile, status, respHeaders)
 		handler(rw, r)
 		respBody = responder.CopyResponseBody(rw)
+
+		if len(allActions) > 0 {
+			tmplCtx := actions.BuildTemplateContext(r, requestBody, rw.Status(), respHeaders, respBody)
+			go actions.Run(context.Background(), allActions, tmplCtx)
+		}
 		return
 	}
 
 	rt.serve404(w, r)
+}
+
+func (rt *Router) resolveDirResponse(match *matcher.Match, r *http.Request) (status int, headers map[string]string, file string, delay int, allActions []config.Action) {
+	status = http.StatusOK
+	headers = make(map[string]string)
+	file = match.FilePath
+	delay = 0
+
+	dc := match.DirConfig
+
+	if dc != nil {
+		status = dc.Status
+		delay = dc.Delay
+		if dc.Headers != nil {
+			for k, v := range dc.Headers {
+				headers[k] = v
+			}
+		}
+		if dc.Actions != nil {
+			allActions = append(allActions, dc.Actions...)
+		}
+		if dc.File != "" {
+			file = resolveFile(match.MatchedDir, dc.File)
+		}
+	}
+
+	qm := config.FindQueryMatch(dc, r.URL.Query())
+	if qm != nil {
+		if qm.Status != 0 {
+			status = qm.Status
+		}
+		if qm.Delay > 0 {
+			delay = qm.Delay
+		}
+		if qm.Headers != nil {
+			for k, v := range qm.Headers {
+				headers[k] = v
+			}
+		}
+		if qm.Actions != nil {
+			allActions = append(allActions, qm.Actions...)
+		}
+		if qm.File != "" {
+			file = resolveFile(match.MatchedDir, qm.File)
+		}
+	}
+
+	if status == 0 {
+		status = http.StatusOK
+	}
+
+	return
+}
+
+func resolveFile(matchedDir, relOrAbs string) string {
+	if filepath.IsAbs(relOrAbs) {
+		return relOrAbs
+	}
+	return filepath.Join(matchedDir, relOrAbs)
+}
+
+func (rt *Router) serveConfigRoute(rw *responder.ResponseWriter, r *http.Request, cfgRoute *config.Route, requestBody string) {
+	filePath := responder.FileFromConfig(cfgRoute)
+	status := responder.StatusFromConfig(cfgRoute)
+	respHeaders := mergeHeaders(rt.cfg.Headers, responder.HeadersFromConfig(cfgRoute))
+
+	if cfgRoute.Response.Delay > 0 {
+		time.Sleep(time.Duration(cfgRoute.Response.Delay) * time.Millisecond)
+	}
+
+	if filePath != "" {
+		handler := responder.Respond(filePath, status, respHeaders)
+		handler(rw, r)
+	} else {
+		handler := responder.RespondBytes([]byte{}, status, respHeaders)
+		handler(rw, r)
+	}
+
+	if len(cfgRoute.Actions) > 0 {
+		tmplCtx := actions.BuildTemplateContext(r, requestBody, rw.Status(), respHeaders, responder.CopyResponseBody(rw))
+		go actions.Run(context.Background(), cfgRoute.Actions, tmplCtx)
+	}
 }
 
 func (rt *Router) serve404(w http.ResponseWriter, r *http.Request) {
