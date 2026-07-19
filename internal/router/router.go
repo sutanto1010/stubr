@@ -189,11 +189,26 @@ func (rt *Router) serve404(w http.ResponseWriter, r *http.Request) {
 		available = append(available, rt.cfg.Routes[i].Method+" "+rt.cfg.Routes[i].Path)
 	}
 
+	queryParams := make(map[string]string)
+	for k, v := range r.URL.Query() {
+		if len(v) > 0 {
+			queryParams[k] = v[0]
+		}
+	}
+
+	fullPath := r.URL.Path
+	if r.URL.RawQuery != "" {
+		fullPath += "?" + r.URL.RawQuery
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotFound)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"error":     "no stub for " + r.Method + " " + r.URL.Path,
-		"available": available,
+		"error":        "no stub for " + r.Method + " " + fullPath,
+		"method":       r.Method,
+		"path":         r.URL.Path,
+		"query_params": queryParams,
+		"available":    available,
 	})
 }
 
