@@ -65,7 +65,7 @@ func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if rt.cfg.DisableConvention {
-		rt.serve404(w, r)
+		rt.serve404(w, r, requestBody)
 		return
 	}
 
@@ -98,7 +98,7 @@ func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rt.serve404(w, r)
+	rt.serve404(w, r, requestBody)
 }
 
 func (rt *Router) resolveDirResponse(match *matcher.Match, r *http.Request) (status int, headers map[string]string, file string, delay int, allActions []config.Action) {
@@ -183,7 +183,7 @@ func (rt *Router) serveConfigRoute(rw *responder.ResponseWriter, r *http.Request
 	}
 }
 
-func (rt *Router) serve404(w http.ResponseWriter, r *http.Request) {
+func (rt *Router) serve404(w http.ResponseWriter, r *http.Request, requestBody string) {
 	available := matcher.ListAvailablePaths(rt.cfg.StubsDir)
 	for i := range rt.cfg.Routes {
 		available = append(available, rt.cfg.Routes[i].Method+" "+rt.cfg.Routes[i].Path)
@@ -208,6 +208,7 @@ func (rt *Router) serve404(w http.ResponseWriter, r *http.Request) {
 		"method":       r.Method,
 		"path":         r.URL.Path,
 		"query_params": queryParams,
+		"body":         requestBody,
 		"available":    available,
 	})
 }
