@@ -3,7 +3,7 @@
 APP_NAME   := stubr
 BIN_DIR    := bin
 IMAGE_NAME := sutanto/stubr
-VERSION    ?= latest
+VERSION    ?= $(shell git rev-parse --short HEAD)
 
 build:
 	@mkdir -p $(BIN_DIR)
