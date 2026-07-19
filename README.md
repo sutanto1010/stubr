@@ -1,5 +1,7 @@
 # stubr
 
+[![GitHub](https://img.shields.io/badge/github-sutanto1010/stubr-blue?logo=github)](https://github.com/sutanto1010/stubr)
+
 HTTP mock/stub server with convention-based directory routing, per-directory config (`_stubr.yaml`), query string matching, and post-response actions.
 
 ## Quickstart
