@@ -1,9 +1,12 @@
+# Default response for all /api/users endpoints (inherits X-Stubr + X-Api-Version from parent _stubr.yaml files)
 status: 200
 delay: 50
 headers:
   X-Resource: users
 
+# Match specific query parameters to return conditional responses
 query_match:
+    # When query string contains ?role=admin, return admin-specific data with extra delay
   - params:
       role: admin
     status: 200
@@ -12,21 +15,26 @@ query_match:
     headers:
       X-Role: admin
 
+    # When query string contains ?role=user&page=1, return paginated data
   - params:
       role: user
       page: "1"
     status: 200
     file: ./page1.json
 
+# Per-HTTP-method overrides (merge with defaults above)
 methods:
   GET:
     delay: 30
     headers:
       Cache-Control: max-age=60
+    # Response body loaded from GET.json in this directory
 
   POST:
     status: 201
     delay: 100
+    # Response body loaded from POST.json in this directory
+    # Actions run after the response is sent; here we publish the request body to Kafka
     actions:
       - type: command
         timeout: 10s
