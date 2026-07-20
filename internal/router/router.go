@@ -152,6 +152,7 @@ func (rt *Router) resolveDirResponse(match *matcher.Match, r *http.Request) (sta
 
 	qm := config.FindQueryMatch(dc, r.URL.Query())
 	if qm != nil {
+		logging.Debug("query_match applied", "query", r.URL.RawQuery)
 		if qm.Status != 0 {
 			status = qm.Status
 		}
@@ -169,6 +170,14 @@ func (rt *Router) resolveDirResponse(match *matcher.Match, r *http.Request) (sta
 		if qm.File != "" {
 			file = resolveFile(match.MatchedDir, qm.File)
 		}
+	} else if dc != nil && len(dc.QueryMatch) > 0 {
+		params := make([]string, 0)
+		for _, qm := range dc.QueryMatch {
+			for k := range qm.Params {
+				params = append(params, k)
+			}
+		}
+		logging.Debug("query_match not matched", "query", r.URL.RawQuery, "expected_params", params)
 	}
 
 	if status == 0 {
