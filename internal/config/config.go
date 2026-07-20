@@ -282,23 +282,31 @@ func ResolveMethodConfig(dc *DirConfig, method string) *DirConfig {
 	return base
 }
 
-func FindQueryMatch(dc *DirConfig, query url.Values) *QueryMatch {
+// FindQueryMatch checks query_match rules against both URL path parameters
+// and query string values. Path params take precedence over query params
+// when the same key exists in both.
+func FindQueryMatch(dc *DirConfig, pathParams map[string]string, query url.Values) *QueryMatch {
 	if dc == nil || len(dc.QueryMatch) == 0 {
 		return nil
 	}
 
 	for i := range dc.QueryMatch {
 		qm := &dc.QueryMatch[i]
-		if matchParams(qm.Params, query) {
+		if matchParams(qm.Params, pathParams, query) {
 			return qm
 		}
 	}
 	return nil
 }
 
-func matchParams(expected map[string]string, actual url.Values) bool {
+func matchParams(expected, pathParams map[string]string, query url.Values) bool {
 	for key, want := range expected {
-		got := actual.Get(key)
+		var got string
+		if v, ok := pathParams[key]; ok {
+			got = v
+		} else {
+			got = query.Get(key)
+		}
 		if got != want {
 			return false
 		}

@@ -5,6 +5,8 @@ headers:
   X-Resource: users
 
 # Match specific query parameters to return conditional responses
+# Params match against both URL path params (:id) and query string params (?role=admin).
+# Path params take precedence when the same key exists in both.
 query_match:
     # When query string contains ?role=admin, return admin-specific data with extra delay
   - params:

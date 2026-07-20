@@ -150,7 +150,7 @@ func (rt *Router) resolveDirResponse(match *matcher.Match, r *http.Request) (sta
 		}
 	}
 
-	qm := config.FindQueryMatch(dc, r.URL.Query())
+	qm := config.FindQueryMatch(dc, match.Params, r.URL.Query())
 	if qm != nil {
 		logging.Debug("query_match applied", "query", r.URL.RawQuery)
 		if qm.Status != 0 {
