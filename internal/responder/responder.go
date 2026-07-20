@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"os"
 
 	"stubr/internal/config"
 	"stubr/internal/contenttype"
+	"stubr/internal/logging"
 )
 
 func Respond(filePath string, status int, headers map[string]string) http.HandlerFunc {
@@ -48,7 +48,7 @@ func Respond(filePath string, status int, headers map[string]string) http.Handle
 		w.WriteHeader(status)
 
 		if _, err := io.Copy(w, f); err != nil {
-			log.Printf("responder: error writing response body: %v", err)
+			logging.Error("error writing response body", "error", err)
 		}
 	}
 }

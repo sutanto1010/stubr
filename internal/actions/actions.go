@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"stubr/internal/config"
+	"stubr/internal/logging"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -30,12 +30,15 @@ func Run(ctx context.Context, actions []config.Action, tmplCtx *config.TemplateC
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("actions: panic in action %s: %v", a.Type, r)
+					logging.Error("action panic", "type", a.Type, "panic", r)
 				}
 			}()
 
 			actionCtx, cancel := context.WithTimeout(ctx, parseTimeout(a.Timeout))
 			defer cancel()
+
+			logging.Info("action start", "type", a.Type)
+			actionStart := time.Now()
 
 			switch a.Type {
 			case config.ActionCommand:
@@ -45,6 +48,8 @@ func Run(ctx context.Context, actions []config.Action, tmplCtx *config.TemplateC
 			case config.ActionScript:
 				runScript(actionCtx, a, tmplCtx)
 			}
+
+			logging.Info("action end", "type", a.Type, "duration", time.Since(actionStart).String())
 		}()
 	}
 }
@@ -63,12 +68,12 @@ func parseTimeout(s string) time.Duration {
 func renderTemplate(s string, ctx *config.TemplateContext) string {
 	t, err := template.New("action").Parse(s)
 	if err != nil {
-		log.Printf("actions: template parse error: %v", err)
+		logging.Error("template parse error", "error", err)
 		return s
 	}
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, ctx); err != nil {
-		log.Printf("actions: template execute error: %v", err)
+		logging.Error("template execute error", "error", err)
 		return s
 	}
 	return buf.String()
@@ -92,9 +97,11 @@ func runCommand(ctx context.Context, action config.Action, tmplCtx *config.Templ
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	log.Printf("actions: running command: %s", cmdStr)
+	logging.Info("command running", "command", cmdStr)
 	if err := cmd.Run(); err != nil {
-		log.Printf("actions: command failed: %v", err)
+		logging.Error("command failed", "command", cmdStr, "error", err)
+	} else {
+		logging.Info("command succeeded", "command", cmdStr)
 	}
 }
 
@@ -122,11 +129,17 @@ func runWebhook(ctx context.Context, action config.Action, tmplCtx *config.Templ
 
 		err := doHTTP(ctx, method, url, body, headers)
 		if err == nil {
-			log.Printf("actions: webhook %s %s succeeded", method, url)
+			logging.Info("webhook succeeded", "method", method, "url", url, "attempt", attempt+1)
 			return
 		}
 
-		log.Printf("actions: webhook %s %s attempt %d/%d failed: %v", method, url, attempt+1, maxRetries+1, err)
+		logging.Warn("webhook failed",
+			"method", method,
+			"url", url,
+			"attempt", attempt+1,
+			"max_retries", maxRetries+1,
+			"error", err,
+		)
 
 		if attempt < maxRetries {
 			backoff := time.Duration(math.Pow(2, float64(attempt))) * time.Second
@@ -137,6 +150,8 @@ func runWebhook(ctx context.Context, action config.Action, tmplCtx *config.Templ
 			}
 		}
 	}
+
+	logging.Error("webhook exhausted retries", "method", method, "url", url, "retries", maxRetries+1)
 }
 
 func doHTTP(ctx context.Context, method, url, body string, headers map[string]string) error {
@@ -174,20 +189,20 @@ func runScript(ctx context.Context, action config.Action, tmplCtx *config.Templa
 
 	f, err := os.CreateTemp("", "stubr-script-*.sh")
 	if err != nil {
-		log.Printf("actions: failed to create temp file: %v", err)
+		logging.Error("failed to create temp file", "error", err)
 		return
 	}
 	defer os.Remove(f.Name())
 
 	if _, err := f.WriteString(script); err != nil {
-		log.Printf("actions: failed to write script: %v", err)
+		logging.Error("failed to write script", "error", err)
 		f.Close()
 		return
 	}
 	f.Close()
 
 	if err := os.Chmod(f.Name(), 0700); err != nil {
-		log.Printf("actions: failed to chmod script: %v", err)
+		logging.Error("failed to chmod script", "file", f.Name(), "error", err)
 		return
 	}
 
@@ -196,9 +211,11 @@ func runScript(ctx context.Context, action config.Action, tmplCtx *config.Templa
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	log.Printf("actions: running script %s", f.Name())
+	logging.Info("script running", "file", f.Name())
 	if err := cmd.Run(); err != nil {
-		log.Printf("actions: script failed: %v", err)
+		logging.Error("script failed", "file", f.Name(), "error", err)
+	} else {
+		logging.Info("script succeeded", "file", f.Name())
 	}
 }
 

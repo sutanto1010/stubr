@@ -3,7 +3,6 @@ package router
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"stubr/internal/actions"
 	"stubr/internal/config"
+	"stubr/internal/logging"
 	"stubr/internal/matcher"
 	"stubr/internal/responder"
 )
@@ -26,7 +26,7 @@ func New(cfg *config.Config) *Router {
 	r.mux.HandleFunc("/", r.handle)
 
 	if err := matcher.LoadDirConfigs(cfg.StubsDir); err != nil {
-		log.Printf("router: error loading directory configs: %v", err)
+		logging.Error("failed to load directory configs", "error", err)
 	}
 
 	return r
@@ -37,15 +37,14 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if path == "" {
 		path = "/"
 	}
 	method := r.Method
 
-	if rt.cfg.Verbose {
-		log.Printf("router: %s %s", method, path)
-	}
+	rt.logRequestStart(method, path)
 
 	requestBody := responder.ReadBody(r)
 
@@ -61,21 +60,24 @@ func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
 	if cfgRoute != nil {
 		rt.serveConfigRoute(rw, r, cfgRoute, requestBody)
 		respBody = responder.CopyResponseBody(rw)
+		rt.logRequestEnd(method, path, rw.Status(), len(respBody), start)
 		return
 	}
 
 	if rt.cfg.DisableConvention {
 		rt.serve404(w, r, requestBody)
+		rt.logRequestEnd(method, path, http.StatusNotFound, 0, start)
 		return
 	}
 
 	match, err := matcher.MatchPath(rt.cfg.StubsDir, method, path)
 	if err != nil {
-		log.Printf("router: match error: %v", err)
+		logging.Error("match error", "method", method, "path", path, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":  "failed to match route",
 			"detail": err.Error(),
 		})
+		rt.logRequestEnd(method, path, http.StatusInternalServerError, 0, start)
 		return
 	}
 
@@ -92,13 +94,36 @@ func (rt *Router) handle(w http.ResponseWriter, r *http.Request) {
 		respBody = responder.CopyResponseBody(rw)
 
 		if len(allActions) > 0 {
+			logging.Info("dispatching actions", "method", method, "path", path, "count", len(allActions), "file", finalFile)
 			tmplCtx := actions.BuildTemplateContext(r, requestBody, rw.Status(), respHeaders, respBody)
 			go actions.Run(context.Background(), allActions, tmplCtx)
 		}
+
+		rt.logRequestEnd(method, path, rw.Status(), len(respBody), start)
 		return
 	}
 
 	rt.serve404(w, r, requestBody)
+	rt.logRequestEnd(method, path, http.StatusNotFound, 0, start)
+}
+
+func (rt *Router) logRequestStart(method, path string) {
+	if rt.cfg.Verbose {
+		logging.Debug("request start", "method", method, "path", path)
+	} else {
+		logging.Info("request start", "method", method, "path", path)
+	}
+}
+
+func (rt *Router) logRequestEnd(method, path string, status, bodySize int, start time.Time) {
+	duration := time.Since(start)
+	logging.Info("request end",
+		"method", method,
+		"path", path,
+		"status", status,
+		"size", bodySize,
+		"duration", duration.String(),
+	)
 }
 
 func (rt *Router) resolveDirResponse(match *matcher.Match, r *http.Request) (status int, headers map[string]string, file string, delay int, allActions []config.Action) {
@@ -178,6 +203,7 @@ func (rt *Router) serveConfigRoute(rw *responder.ResponseWriter, r *http.Request
 	}
 
 	if len(cfgRoute.Actions) > 0 {
+		logging.Info("dispatching actions", "method", r.Method, "path", cfgRoute.Path, "count", len(cfgRoute.Actions), "source", "config_route")
 		tmplCtx := actions.BuildTemplateContext(r, requestBody, rw.Status(), respHeaders, responder.CopyResponseBody(rw))
 		go actions.Run(context.Background(), cfgRoute.Actions, tmplCtx)
 	}

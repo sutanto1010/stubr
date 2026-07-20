@@ -1,13 +1,13 @@
 package matcher
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"stubr/internal/config"
+	"stubr/internal/logging"
 )
 
 var dirConfigCache = make(map[string]*config.DirConfig)
@@ -34,7 +34,7 @@ func LoadDirConfigs(stubsDir string) error {
 		}
 		dc, err := config.LoadDirConfig(path)
 		if err != nil {
-			log.Printf("matcher: error loading _stubr.yaml in %s: %v", path, err)
+			logging.Warn("error loading dir config", "path", path, "error", err)
 			return nil
 		}
 		if dc != nil {

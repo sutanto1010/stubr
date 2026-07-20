@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"stubr/internal/config"
+	"stubr/internal/logging"
 	"stubr/internal/router"
 )
 
@@ -58,21 +58,23 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("stubr listening on %s", addr)
+		logging.Info("stubr listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+			logging.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-quit
-	log.Println("shutting down...")
+	logging.Info("shutting down...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("forced shutdown: %v", err)
+		logging.Error("forced shutdown", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("server stopped")
+	logging.Info("server stopped")
 }
